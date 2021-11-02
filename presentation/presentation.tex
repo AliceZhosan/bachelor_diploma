@@ -1,0 +1,396 @@
+% !TEX encoding   = UTF8
+% !TEX spellcheck = ru_RU
+
+\documentclass[xcolor={svgnames,table,hyperref},9pt]{beamer}
+
+\usefonttheme{professionalfonts}
+
+%\usepackage{setspace}
+
+\usepackage{amsthm,amsfonts,amsmath,amscd}
+\usepackage{mathtools}     % Add environment 'multlined'
+\usepackage{dsfont}
+%\usepackage{mathspec}     % do not work with LuaLaTeX
+\usepackage{unicode-math}
+
+\usepackage{polyglossia}   % Automatically load 'fontspec'
+
+\usepackage{appendixnumberbeamer}
+
+\usepackage{minted}
+
+\usepackage{hyperref}
+
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows,decorations.pathmorphing,backgrounds,positioning,fit,calc}
+\usetikzlibrary{arrows.meta,matrix}
+\usetikzlibrary{shapes,shapes.misc}
+
+
+%%% Hyper references colors %%%
+
+\definecolor{linkcolor}{rgb}{0.9,0,0}
+\definecolor{citecolor}{rgb}{0,0.6,0}
+\definecolor{urlcolor}{rgb}{0,0,1}
+
+
+\hypersetup{
+  unicode,
+  linktocpage=true,
+%  linktoc=all,                % both the section and page part are links
+%  pdfpagelabels=false,
+  plainpages=false,
+  colorlinks,
+  linkcolor={linkcolor},
+  citecolor={citecolor},
+  urlcolor={urlcolor},
+%  hidelinks,
+  pdflang={ru},
+}
+
+
+\setmainlanguage[babelshorthands=true]{russian}
+\setotherlanguage{english}
+
+\setmonofont{Fira Code}
+\newfontfamily\cyrillicfonttt{Fira Code}
+
+\defaultfontfeatures{Ligatures=TeX}  % NB! monofont settings should be before this
+
+\usetheme{metropolis}
+\setbeamercolor{normal text}{bg=white}
+%\setbeamercolor{frametitle}{% for printing
+%  use=normal text,
+%  parent=normal text
+%}
+%\setbeameroption{show notes}
+
+\metroset{progressbar=frametitle,subsectionpage=none}
+
+\setsansfont{Fira Sans}
+\newfontfamily\cyrillicfontsf{Fira Sans}
+
+\setmathfont{STIX Two Math}
+\newfontfamily\cyrillicfontmf{STIX Two Math}
+
+
+\graphicspath{{images/}}
+
+
+\renewcommand{\theFancyVerbLine}{%
+  \textcolor{gray}{\tiny\arabic{FancyVerbLine}}%
+}
+
+\newmintinline{cpp}{fontsize=\small}
+\newmintinline{text}{fontsize=\small}
+
+\newmint{cpp}{fontsize=\small}
+\newmint[txt]{text}{fontsize=\small}
+\newmint{console}{fontsize=\small}
+
+\newminted{cpp}{fontsize=\small, numbersep=0.2em}
+\newminted{text}{fontsize=\small, tabsize=2}
+\newminted{console}{fontsize=\small, tabsize=2}
+
+\newmintedfile{cpp}{linenos, fontsize=\small, numbersep=0.2em}
+\newmintedfile{text}{fontsize=\small, tabsize=2}
+\newmintedfile{console}{fontsize=\small, tabsize=2}
+
+\newcommand*{\code}[1]{\texttt{\small #1}}
+
+
+
+\title
+{
+  Модификации компонентов ZEUS,\\
+  \hfil направленные на ускорение\ldots\\[1em]
+  {\small\itshape (\TeX{}нический семинар)}
+}
+
+\author
+{
+  В.Ю.\,Подаруев
+}
+
+\institute[ЦАГИ]
+{
+  Отделение аэродинамики cиловых установок, ЦАГИ, г.\,Жуковский
+}
+
+\date{\itshape 26 сентября 2019\,г.}
+
+
+
+
+\begin{document}
+
+%%========
+\maketitle
+%%========
+
+\begin{frame}{Краткий план}
+  \begin{block}{}
+    \begin{itemize}
+      \item \code{z\_make\_connection}
+      \item \code{z\_dwall}
+      \item Прочее\ldots
+      \item Стиль кода
+      \item Масштабируемость
+      \item Декомпозиция
+    \end{itemize}
+  \end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}{Стыковка блоков: \texttt{z\_make\_connection}}
+  \begin{block}{Типичное использование}
+    \console`$ z_make_connection -v proj boco`
+  \end{block}
+
+  \begin{block}{Изменения}\begin{itemize}
+    \item алгоритм переписан с сохранением логики;
+    \item при выводе $\Delta_\text{max}$ везде используется расстояние, а не его квадрат;
+    \item многопоточная реализация через \alert{\code{OpenMP}};
+    \item ключик \code{ -n N } задаёт количество нитей;
+    \item \alert{по умолчанию} \code{ N = число ядер CPU}.
+  \end{itemize}\end{block}
+
+  \begin{block}{Проблемы}\begin{itemize}
+    \item \textcolor{ForestGreen}{[fix]} стыковка с периодическими гран. условиями;
+    \item \alert{исключения} не могут покидать [обычным образом] многопоточную область кода --- это приводит к аварийному завершению;
+    \item{} <<зашитые>> в коде константы, связанные с точностью.
+  \end{itemize}\end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}[fragile]{Расстояние до стенки: \texttt{z\_dwall}}
+  \begin{block}{Типичное использование}
+    \console`$ mpiexec --hostfile hosts z_dwall -n Ncpus -v proj boco`
+
+    где файл \code{hosts} имеет вид:
+
+    \begin{textcode}
+192.168.103.187 slots=1
+192.168.103.188 slots=1
+...
+    \end{textcode}
+  \end{block}
+
+  \begin{block}{Изменения}\begin{itemize}
+    \item многопоточная реализация через \alert{\code{OpenMP}};
+    \item ключик \code{ -n N } задаёт количество нитей;
+    \item \alert{по умолчанию} \code{ N = 1 } (совместимость с прежней версией).
+  \end{itemize}\end{block}
+  
+  \begin{block}{Рекомендации}\begin{itemize}
+    \item Используйте \alert{многопоточную} версию \alert{в рамках} каждого \alert{узла}. Для компоновки WBLR, $\approx$50 млн. ячеек, 10 узлов Карлсон-2:
+    \txt/MPI = 1192 c vs. MPI+OpenMP = 585 с/
+  \end{itemize}\end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}{Прочее\ldots}
+  \begin{block}{Буферизация ввода--вывода}\begin{itemize}
+    \item Системные вызовы \code{read/write} заменены на буферизованные версии из стандартной библиотеки C \code{fread/fwrite}.
+  \end{itemize}\end{block}
+
+  \begin{block}{Группировка сообщений о коррекциях}\begin{itemize}
+    \item При выводе сообщения о коррекциях пересылаются в корневой рэнк, который их и печатает на экране.
+    \item Версия в \code{ZEUS} отличается от реализации в \code{zFlare}.
+  \end{itemize}\end{block}
+
+  \begin{block}{Обмены}\begin{itemize}
+    \item Согласно рекомендациям стандарта, вызов \code{MPI\_Irecv} должен предшествовать вызову \code{MPI\_Isend}. Такой порядок устранил проблемы с обменами при использовании \code{OpenMPI-4}. Для сравнения, та же задача, 20 итераций:
+    \txt/OpenMPI-1 = 127 c vs. OpenMPI-4 = 122 с/
+  \end{itemize}\end{block}
+\end{frame}
+
+
+\begin{frame}[fragile]{Стиль кода}
+  \begin{block}{Рекомендации}\begin{itemize}
+    \item Следите за используемыми средствами, в частности, не используйте \code{std::deque} там, где нужен обычный массив.
+
+    \cpp/typedef std::vector<zNeighboursUnit> zNeighboursArray;/
+    
+    \item Используйте макрос \cppinline/Z_LOC/ вместо \cppinline/__FILE__,__LINE__/.
+
+    \begin{cppcode}
+if (!fp)
+  throw z::zOpenFileErr (Z_LOC, filename);
+    \end{cppcode}
+
+    \item Используйте макрос \cppinline/Z_OVERRIDE/ и модификатор \cppinline/const/.
+
+    \cpp/double kinetic_energy (const PVec& P) const Z_OVERRIDE;/
+    
+    \item Используйте концепцию RAII, где это возможно.
+    
+    \cpp/FileHandle fd (file, "wb");/
+
+    \item По возможности, разделяйте код на логические действия, помещая каждое в отдельную функцию.
+
+    \item Объявляйте переменные по месту использования. Локальность улучшает читабельность и помогает компилятору оптимизировать код.
+  \end{itemize}\end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}{Масштабируемость}
+  \begin{center}
+    Компоновка WBLR, $\approx$50 млн. ячеек, кластер в г.\,Саров
+  \end{center}
+  \begin{figure}
+    \includegraphics[width=0.8\textwidth]{scalability_wblr_lam_c20000.pdf}
+  \end{figure}
+\end{frame}
+
+
+\begin{frame}{Влияние декомпозиции}
+  \begin{figure}
+    \includegraphics<1>[width=0.95\textwidth]{wblr_lam_ini.pdf}
+    \includegraphics<2>[width=0.95\textwidth]{wblr_lam_r480.pdf}
+  \end{figure}
+\end{frame}
+
+
+%%==============================================================
+\begin{frame}[fragile]{Декомпозиция: \texttt{decomp.py}}
+  \begin{consolecode}
+$ python decomp.py -h
+usage: decomp.py [-h] [-c N] -r N [-s {auto,equal,slice}] [-v] [-d]
+                 {boco,field,graph,mesh,split,view} ...
+  \end{consolecode}
+
+  \begin{block}{Управляющие параметры}\begin{itemize}
+    \item \code{-r N } "--- желаемое количество рэнков
+  \end{itemize}\end{block}
+
+  \begin{block}{Тонкая настройка}\begin{itemize}
+    \item \code{-с N } "--- максимальное желаемое количество ячеек в блоках
+    \item \code{-s \{auto,equal,slice\} } "--- алгоритм разбиения блоков
+  \end{itemize}\end{block}
+
+  \begin{block}{Команды}\begin{itemize}
+    \item \code{view} / \code{graph} "--- анализ / с визуализацией, используя \code{Matplotlib}
+    \item \code{boco} "--- декомпозиция только \code{*.zboco} (старый файл \code{*\_orig.zboco})
+    \item \code{field} "--- декомпозиция только полей
+    \item \code{mesh} "--- равносильно \code{boco} \& декомпозиция сетки
+    \item \code{split} "--- равносильно \code{field} \& \code{mesh}
+  \end{itemize}\end{block}
+\end{frame}
+
+
+\begin{frame}{Алгоритм разбиения по умолчанию: \texttt{auto}}
+  \begin{block}{При ограничении $\text{max}_\text{cells}$ для каждого блока размером $I\times J\times K$:}\begin{enumerate}
+    \item Вычисляем количество подблоков $n = \left\lceil \dfrac{I\cdot J\cdot K}{\text{max}_\text{cells}} \right\rceil$.
+    \item Генерируем тройки "--- $i,j,k$ частей в соответств. направлениях:
+
+    \begin{tabbing}
+      \ttfamily for $i = 1$ to $n$ \\
+      \qquad\= $n_j = \left\lceil \dfrac{n}{i} \right\rceil$\\[5pt]
+      \>\ttfamily for $j = 1$ to $n_j$ \\[5pt]
+      \> \qquad\= $k = \left\lceil \dfrac{n}{i\cdot j} \right\rceil$ \\
+      \>       \> yield $(i, j, k) \quad \rightarrow \quad \{(i,j,k): n \leqslant i\cdot j\cdot k < 2n\}$
+    \end{tabbing}
+    
+    \item Вычисляем площади разрезов:
+    \[
+       \forall i,j,k:\quad S_\text{cut}(i,j,k) = (i-1)\cdot J K + (j-1)\cdot I K + (k-1)\cdot I J.
+    \]
+    
+    \item Выбираем тройку с минимальным $S_\text{cut}$.
+  \end{enumerate}\end{block}
+\end{frame}
+
+
+\begin{frame}{Анализ: \texttt{decomp.py -r 1024 graph -b 50 z.zboco}}
+  \begin{figure}
+    \includegraphics[width=0.95\textwidth]{wblr_lam_r1024.pdf}
+  \end{figure}
+\end{frame}
+
+
+\begin{frame}{Более тонкая настройка: ключик \texttt{-c}}
+  \begin{figure}
+    \includegraphics<1>[width=0.95\textwidth]{wblr_lam_r1024_c30000.pdf}
+    \includegraphics<2>[width=0.95\textwidth]{wblr_lam_r1024_c20000.pdf}
+  \end{figure}
+\end{frame}
+
+
+\begin{frame}{Иной путь}
+  \begin{figure}
+    \includegraphics[width=0.95\textwidth]{wblr_lam_r1100_c30000.pdf}
+  \end{figure}
+\end{frame}
+
+
+\begin{frame}[fragile]{Декомпозиция и восстановление}
+  \begin{itemize}
+    \item поля отдельно
+    \begin{consolecode}
+$ python decomp.py ... field -h
+usage: decomp.py field [-h] [-n N] proj_file boco_file
+    \end{consolecode}
+
+    \item сетка отдельно
+    \begin{consolecode}
+$ python decomp.py ... mesh -h
+usage: decomp.py mesh [-h] [-n N] boco_file
+    \end{consolecode}
+
+    \item всё вместе и сразу
+    \begin{consolecode}
+$ python decomp.py ... split -h
+usage: decomp.py split [-h] [-n N] proj_file boco_file
+    \end{consolecode}
+
+    \item ведётся лог-файл
+
+    \item восстановление полей
+    \begin{consolecode}
+$ python recomp.py -h
+usage: recomp.py [-h] [-n N] [-v] [-d] proj_file boco_file
+    \end{consolecode}
+  \end{itemize}
+
+  \begin{block}{Проблемы}\begin{itemize}
+    \item Многопоточная версия реализована простым способом, используя \code{Pool} из \code{multiprocessing} и \alert{не работает} в Windows. \alert{Не <<убивается>>} в Linux привычным \code{Ctrl+C}.
+
+    \console`$ pkill -09 decomp.py`
+  \end{itemize}\end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}{Вместо заключения}
+  Необходимо накопить опыт использования, чтобы исправить недочёты. Приветствуются критические замечания и полезные функциональные пожелания.
+  
+  \begin{block}{Дальнейшие планы:}\begin{itemize}
+    \item Декомпозиция и восстановление для патчей.
+    \item Учёт весов для дробного шага.
+    \item \ldots
+  \end{itemize}\end{block}
+\end{frame}
+
+
+
+%%==============================================================
+\begin{frame}[standout]
+  \begin{center}
+    \huge Давайте жить дружно!
+    
+    \large Спасибо за внимание!
+  \end{center}
+\end{frame}
+
+\end{document}
