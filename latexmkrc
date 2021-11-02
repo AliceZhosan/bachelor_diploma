@@ -1,3 +1,5 @@
+#!/usr/bin/env perl
+
 $LATEXFLAGS = $ENV{LATEXFLAGS};
 $LATEXFLAGS //= '';
 $BIBERFLAGS = $ENV{BIBERFLAGS};
@@ -5,11 +7,7 @@ $BIBERFLAGS //= '';
 $TIMERON = $ENV{TIMERON};
 $TIMERON //= '0';
 $REGEXDIRS = $ENV{REGEXDIRS};
-$REGEXDIRS //= '.';
-
-
-add_cus_dep('pytxcode', 'tex', 0, 'pythontex');
-sub pythontex { return system("pythontex3 \"$_[0]\""); }
+$REGEXDIRS //= '. cpp asm';
 
 
 $biber = 'biber ' . $BIBERFLAGS . ' %O %S';
@@ -28,6 +26,40 @@ $clean_ext = '%R.bbl %R.aux %R.lof %R.log %R.lot %R.fls %R.out %R.toc %R.run.xml
 
 # extensions to clean with -C flag
 $clean_full_ext = '%R.bbl %R.aux %R.lof %R.log %R.lot %R.fls %R.out %R.toc %R.run.xml %R.xdv %R.snm %R.nav';
+
+
+$clean_ext .= " pythontex-files-%R/* pythontex-files-%R";
+push @generated_exts, 'pytxcode';
+
+sub mypython {
+  return "py -3" if ( $^O =~ /MSWin32/ );
+  return "python3";
+}
+
+$pythontex = 'pythontex --interpreter python:"'.mypython().'" %O %S';
+$extra_rule_spec{'pythontex'}  = [ 'internal', '', 'mypythontex', "%Y%R.pytxcode", "%Ypythontex-files-%R/%R.pytxmcr", "%R", 1 ];
+
+sub mypythontex {
+  my $result_dir = $aux_dir1."pythontex-files-$$Pbase";
+  my $ret = Run_subst( $pythontex, 2 );
+  rdb_add_generated( glob "$result_dir/*" );
+  my $fh = new FileHandle $$Pdest, "r";
+  if ($fh) {
+    while (<$fh>) {
+      if ( /^%PythonTeX dependency:\s+'([^']+)';/ ) {
+        print "Found pythontex dependency '$1'\n";
+        rdb_ensure_file( $rule, $aux_dir1.$1 );
+      }
+    }
+    undef $fh;
+  }
+  else {
+    warn "mypythontex: I could not read '$$Pdest'\n",
+         "  to check dependencies\n";
+  }
+  return $ret;
+}
+
 
 # this option is for debugging
 # 0 to silently delete files, 1 to show what would be deleted
@@ -165,7 +197,8 @@ push(@clean_regexp,
 
 # minted
 push(@clean_regexp,
-     '_minted*',
+     '_minted*/*',
+     '_minted*/',
      '*.pyg',
     );
 
@@ -206,6 +239,7 @@ push(@clean_regexp,
 
 # pythontex
 push(@clean_regexp,
+     'pythontex-files-*/*',
      'pythontex-files-*/',
      '*.pytxcode',
     );
@@ -317,6 +351,9 @@ sub regexp_cleanup {
     }
 }
 
+
+{ no warnings 'redefine';
+
 sub cleanup1 {
     # Usage: cleanup1( directory, exts_without_period, ... )
     #
@@ -326,8 +363,8 @@ sub cleanup1 {
     my $root_fixed = fix_pattern( $root_filename );
     foreach (@_) {
         my $name = /%R/ ? $_ : "%R.$_";
-	$name =~ s/%R/${root_fixed}/;
-	$name = $dir.$name;
+        $name =~ s/%R/${root_fixed}/;
+        $name = $dir.$name;
         if ($remove_dryrun == 0) {
             unlink_or_move( glob( "$name" ) );
         } else {
@@ -339,3 +376,4 @@ sub cleanup1 {
     }
 } #END cleanup1
 
+} # no warnings 'redefine';
